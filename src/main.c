@@ -138,18 +138,30 @@ int main()
 
     char ascii_frame[cols * rows];
 
-    int cam_active = sceCameraIsActive(curr_cam);
+    SceCtrlData ctrl_peek; SceCtrlData ctrl_press;
 
     while (1) {
-        SceCtrlData pad;
-        sceCtrlPeekBufferPositive(0, &pad, 1);
-        if (pad.buttons & SCE_CTRL_START) break;
+        ctrl_press = ctrl_peek;
+        sceCtrlPeekBufferPositive(0, &ctrl_peek, 1);
+        ctrl_press.buttons = ctrl_peek.buttons & ~ctrl_press.buttons; // input debouncing
+
+        if (ctrl_press.buttons & SCE_CTRL_START) break;
+
+        if (ctrl_press.buttons & SCE_CTRL_CROSS) {
+            sceCameraStop(curr_cam);
+            sceCameraClose(curr_cam);
+
+            curr_cam = (curr_cam+1)%2;
+
+            sceCameraOpen(curr_cam, &cam_info);
+            sceCameraStart(curr_cam);
+        }
 
         uint8_t *cam_ptr = (uint8_t *)camera_buf;
         // point to the buffer that is NOT currently shown
         uint32_t *out_ptr = display_bufs[buf_idx];
 
-        if (cam_active) {
+        if (sceCameraIsActive(curr_cam)) {
             SceCameraRead read = { sizeof(SceCameraRead), 0 };
             sceCameraRead(curr_cam, &read);
 
