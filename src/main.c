@@ -23,6 +23,9 @@
 
 #define MEMSIZE 0x400000
 
+#define MODE_COUNT 2
+#define ASCII_MODE 0
+#define NORMAL_MODE 1
 
 const float font_size = 10.0f;
 
@@ -101,6 +104,8 @@ int main()
     init_font(font_size);
     init_brightness_lut();
 
+    char curr_mode = ASCII_MODE;
+
     void *base;
     // use this non caching (unnecessary cache flushes if you dont) and physically contigous mem
     SceUID memblock = sceKernelAllocMemBlock("camera",
@@ -157,6 +162,20 @@ int main()
             sceCameraStart(curr_cam);
         }
 
+        if (ctrl_press.buttons & SCE_CTRL_TRIANGLE) {
+            sceCameraStop(curr_cam);
+            sceCameraClose(curr_cam);
+
+            curr_mode = (curr_mode+1)%2;
+
+            cam_info.format = (curr_mode == ASCII_MODE) ? SCE_CAMERA_FORMAT_YUV422_PACKED : SCE_CAMERA_FORMAT_ABGR;
+
+            sceCameraOpen(curr_cam, &cam_info);
+            sceCameraStart(curr_cam);
+        }
+
+        // TODO: Add more camera settings configuration (i.e. contrast, brightness etc)
+
         uint8_t *cam_ptr = (uint8_t *)camera_buf;
         // point to the buffer that is NOT currently shown
         uint32_t *out_ptr = display_bufs[buf_idx];
@@ -167,27 +186,31 @@ int main()
 
             sceClibMemset(out_ptr, 0, DISPLAY_HEIGHT * DISPLAY_WIDTH * 4);
 
-            for (int r = 0; r < rows; r++) {
-                for (int c = 0; c < cols; c++) {
-                    int sum = 0;
-                    const int col_offset = c * block_w;
-                    for (int yy = 0; yy < block_h; yy += 2) { // skip every other row
-                        const uint8_t *row_ptr = &cam_ptr[(r * block_h + yy) * CAMERA_WIDTH * 2];
-                        for (int xx = 0; xx < block_w; xx++) {
-                            sum += row_ptr[(col_offset + xx) * 2 + 1]; // Y is at odd positions
+            if (curr_mode == ASCII_MODE) {
+                for (int r = 0; r < rows; r++) {
+                    for (int c = 0; c < cols; c++) {
+                        int sum = 0;
+                        const int col_offset = c * block_w;
+                        for (int yy = 0; yy < block_h; yy += 2) { // skip every other row
+                            const uint8_t *row_ptr = &cam_ptr[(r * block_h + yy) * CAMERA_WIDTH * 2];
+                            for (int xx = 0; xx < block_w; xx++) {
+                                sum += row_ptr[(col_offset + xx) * 2 + 1]; // Y is at odd positions
+                            }
                         }
+                        ascii_frame[r * cols + c] = brightness_lut[sum / BRIGHTNESS_DIV];
                     }
-                    ascii_frame[r * cols + c] = brightness_lut[sum / BRIGHTNESS_DIV];
                 }
-            }
 
-            for (int r = 0; r < rows; r++) {
-                for (int c = 0; c < cols; c++) {
-                    draw_char((unsigned char*)out_ptr,
-                            DISPLAY_WIDTH, DISPLAY_HEIGHT,
-                            ascii_frame[r * cols + c],
-                            c * block_w, r * block_h);
+                for (int r = 0; r < rows; r++) {
+                    for (int c = 0; c < cols; c++) {
+                        draw_char((unsigned char*)out_ptr,
+                                DISPLAY_WIDTH, DISPLAY_HEIGHT,
+                                ascii_frame[r * cols + c],
+                                c * block_w, r * block_h);
+                    }
                 }
+            } else if (curr_mode == NORMAL_MODE) {
+                sceClibMemcpy(out_ptr, cam_ptr, DISPLAY_WIDTH * DISPLAY_HEIGHT * 4);
             }
 
             dbuf.base = display_bufs[buf_idx];
