@@ -1,0 +1,6 @@
+CompileFlags:
+  Add: [
+    "-target", "arm-vita-eabi",
+    "-I", "/usr/local/vitasdk/arm-vita-eabi/include",
+    "-isystem", "/usr/local/vitasdk/arm-vita-eabi/include"
+  ]
