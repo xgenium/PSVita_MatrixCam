@@ -38,6 +38,16 @@ const int num_chars = 10;
 unsigned char font_bitmap[512 * 512]; // a big sheet of all characters
 stbtt_bakedchar baked_chars[96]; // metadata for ASCII 32...126
 
+char brightness_lut[256];
+
+// instead of division + index every pixel, precompute all values at once
+void init_brightness_lut()
+{
+    for (int i = 0; i < 256; i++) {
+        brightness_lut[i] = ramp[i * (num_chars - 1) / 255];
+    }
+}
+
 void init_font(float font_size)
 {
     // place font in ux0:app/TITLE_ID/font.ttf
@@ -85,18 +95,16 @@ void draw_char(unsigned char *video_buf, int buf_w, int buf_h, char c, int x, in
     }
 }
 
-char brightness_to_ascii(int brightness)
-{
-    return ramp[brightness * (num_chars - 1) / 255];
-}
 
 int main()
 {
     init_font(font_size);
+    init_brightness_lut();
 
     void *base;
+    // use this non caching (unnecessary cache flushes if you dont) and physically contigous mem
     SceUID memblock = sceKernelAllocMemBlock("camera",
-            SCE_KERNEL_MEMBLOCK_TYPE_USER_CDRAM_RW, MEMSIZE, NULL);
+            SCE_KERNEL_MEMBLOCK_TYPE_USER_MAIN_PHYCONT_NC_RW, MEMSIZE, NULL);
     sceKernelGetMemBlockBase(memblock, &base);
 
     uint32_t *display_bufs[2];
@@ -130,6 +138,8 @@ int main()
 
     char ascii_frame[cols * rows];
 
+    int cam_active = sceCameraIsActive(curr_cam);
+
     while (1) {
         SceCtrlData pad;
         sceCtrlPeekBufferPositive(0, &pad, 1);
@@ -139,7 +149,7 @@ int main()
         // point to the buffer that is NOT currently shown
         uint32_t *out_ptr = display_bufs[buf_idx];
 
-        if (sceCameraIsActive(curr_cam)) {
+        if (cam_active) {
             SceCameraRead read = { sizeof(SceCameraRead), 0 };
             sceCameraRead(curr_cam, &read);
 
@@ -155,7 +165,7 @@ int main()
                             sum += row_ptr[(col_offset + xx) * 2 + 1]; // Y is at odd positions
                         }
                     }
-                    ascii_frame[r * cols + c] = brightness_to_ascii(sum / BRIGHTNESS_DIV);
+                    ascii_frame[r * cols + c] = brightness_lut[sum / BRIGHTNESS_DIV];
                 }
             }
 
