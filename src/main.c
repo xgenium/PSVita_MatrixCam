@@ -38,6 +38,13 @@ const int block_h = 10; // account for tall text
 const char *ramp = " .:-=+*10#";
 const int num_chars = 10;
 
+typedef struct {
+    int curr_cam;
+    int curr_mode;
+    int curr_brightness;
+    int curr_contrast;
+} XgCamConfig;
+
 unsigned char font_bitmap[512 * 512]; // a big sheet of all characters
 stbtt_bakedchar baked_chars[96]; // metadata for ASCII 32...126
 
@@ -98,13 +105,57 @@ void draw_char(unsigned char *video_buf, int buf_w, int buf_h, char c, int x, in
     }
 }
 
+XgCamConfig get_default_cam_cfg(int curr_cam)
+{
+    XgCamConfig cfg = {0};
+    cfg.curr_cam = SCE_CAMERA_DEVICE_FRONT; // default cam
+    cfg.curr_mode = ASCII_MODE;
+    sceCameraGetBrightness(curr_cam, &cfg.curr_brightness);
+    sceCameraGetContrast(curr_cam, &cfg.curr_contrast);
+
+    return cfg;
+}
+
+void set_cam_cfg(int cam_num, const XgCamConfig *cam_cfg)
+{
+    sceCameraSetBrightness(cam_num, cam_cfg->curr_brightness);
+    sceCameraSetContrast(cam_num, cam_cfg->curr_contrast);
+}
+
+// handle camera effects based on button input that doesnt require restart
+// return 0 if nothing changed; 1 otherwise
+int handle_cam_cfg(const SceCtrlData *ctrl_press, XgCamConfig *cam_cfg)
+{
+    unsigned int buttons = ctrl_press->buttons;
+    char pressed = 0;
+    if (buttons & SCE_CTRL_RIGHT) {
+        if (cam_cfg->curr_brightness <= 255) cam_cfg->curr_brightness += 5;
+        pressed = 1;
+    }
+    if (buttons & SCE_CTRL_LEFT) {
+        if (cam_cfg->curr_brightness >= 0) cam_cfg->curr_brightness -= 5;
+        pressed = 1;
+    }
+    if (buttons & SCE_CTRL_UP) {
+        if (cam_cfg->curr_contrast <= 255) cam_cfg->curr_contrast += 5;
+        pressed = 1;
+    }
+
+    if (buttons & SCE_CTRL_DOWN) {
+        if (cam_cfg->curr_contrast >= 0) cam_cfg->curr_contrast -= 5;
+        pressed = 1;
+    }
+
+    return pressed;
+}
 
 int main()
 {
     init_font(font_size);
     init_brightness_lut();
 
-    char curr_mode = ASCII_MODE;
+    XgCamConfig cam_cfg = {0};
+    cam_cfg.curr_cam = SCE_CAMERA_DEVICE_FRONT;
 
     void *base;
     // use this non caching (unnecessary cache flushes if you dont) and physically contigous mem
@@ -133,10 +184,11 @@ int main()
     cam_info.pIBase = camera_buf;
     cam_info.sizeIBase = MEMSIZE/2; // half of total memory
 
-    int curr_cam = SCE_CAMERA_DEVICE_FRONT;
+    sceCameraOpen(cam_cfg.curr_cam, &cam_info);
+    sceCameraStart(cam_cfg.curr_cam);
 
-    sceCameraOpen(curr_cam, &cam_info);
-    sceCameraStart(curr_cam);
+    XgCamConfig default_cam_cfg = get_default_cam_cfg(cam_cfg.curr_cam);
+    cam_cfg = default_cam_cfg;
 
     int rows = DISPLAY_HEIGHT / block_h;
     int cols = DISPLAY_WIDTH / block_w;
@@ -153,40 +205,54 @@ int main()
         if (ctrl_press.buttons & SCE_CTRL_START) break;
 
         if (ctrl_press.buttons & SCE_CTRL_CROSS) {
-            sceCameraStop(curr_cam);
-            sceCameraClose(curr_cam);
+            sceCameraStop(cam_cfg.curr_cam);
+            sceCameraClose(cam_cfg.curr_cam);
 
-            curr_cam = (curr_cam+1)%2;
+            cam_cfg.curr_cam = (cam_cfg.curr_cam+1)%2;
 
-            sceCameraOpen(curr_cam, &cam_info);
-            sceCameraStart(curr_cam);
+            sceCameraOpen(cam_cfg.curr_cam, &cam_info);
+            sceCameraStart(cam_cfg.curr_cam);
+
+            set_cam_cfg(cam_cfg.curr_cam, &cam_cfg);
         }
 
         if (ctrl_press.buttons & SCE_CTRL_TRIANGLE) {
-            sceCameraStop(curr_cam);
-            sceCameraClose(curr_cam);
+            sceCameraStop(cam_cfg.curr_cam);
+            sceCameraClose(cam_cfg.curr_cam);
 
-            curr_mode = (curr_mode+1)%2;
+            cam_cfg.curr_mode = (cam_cfg.curr_mode+1)%2;
 
-            cam_info.format = (curr_mode == ASCII_MODE) ? SCE_CAMERA_FORMAT_YUV422_PACKED : SCE_CAMERA_FORMAT_ABGR;
+            cam_info.format = (cam_cfg.curr_mode == ASCII_MODE) ? SCE_CAMERA_FORMAT_YUV422_PACKED : SCE_CAMERA_FORMAT_ABGR;
 
-            sceCameraOpen(curr_cam, &cam_info);
-            sceCameraStart(curr_cam);
+            sceCameraOpen(cam_cfg.curr_cam, &cam_info);
+            sceCameraStart(cam_cfg.curr_cam);
+
+            set_cam_cfg(cam_cfg.curr_cam, &cam_cfg);
         }
 
-        // TODO: Add more camera settings configuration (i.e. contrast, brightness etc)
+        if (handle_cam_cfg(&ctrl_press, &cam_cfg)) // handle effects
+            set_cam_cfg(cam_cfg.curr_cam, &cam_cfg);
+
+        if (ctrl_press.buttons & SCE_CTRL_CIRCLE) { // reset to default effects and mode
+            set_cam_cfg(cam_cfg.curr_cam, &default_cam_cfg);
+            int temp_cam = cam_cfg.curr_cam;
+            int temp_mode = cam_cfg.curr_mode;
+            cam_cfg = default_cam_cfg;
+            cam_cfg.curr_cam = temp_cam;
+            cam_cfg.curr_mode = temp_mode;
+        }
 
         uint8_t *cam_ptr = (uint8_t *)camera_buf;
         // point to the buffer that is NOT currently shown
         uint32_t *out_ptr = display_bufs[buf_idx];
 
-        if (sceCameraIsActive(curr_cam)) {
+        if (sceCameraIsActive(cam_cfg.curr_cam)) {
             SceCameraRead read = { sizeof(SceCameraRead), 0 };
-            sceCameraRead(curr_cam, &read);
+            sceCameraRead(cam_cfg.curr_cam, &read);
 
             sceClibMemset(out_ptr, 0, DISPLAY_HEIGHT * DISPLAY_WIDTH * 4);
 
-            if (curr_mode == ASCII_MODE) {
+            if (cam_cfg.curr_mode == ASCII_MODE) {
                 for (int r = 0; r < rows; r++) {
                     for (int c = 0; c < cols; c++) {
                         int sum = 0;
@@ -209,7 +275,7 @@ int main()
                                 c * block_w, r * block_h);
                     }
                 }
-            } else if (curr_mode == NORMAL_MODE) {
+            } else if (cam_cfg.curr_mode == NORMAL_MODE) {
                 sceClibMemcpy(out_ptr, cam_ptr, DISPLAY_WIDTH * DISPLAY_HEIGHT * 4);
             }
 
@@ -222,8 +288,8 @@ int main()
         sceDisplayWaitVblankStart();
     }
 
-    sceCameraStop(curr_cam);
-    sceCameraClose(curr_cam);
+    sceCameraStop(cam_cfg.curr_cam);
+    sceCameraClose(cam_cfg.curr_cam);
     sceKernelFreeMemBlock(memblock);
 
     return 0;
