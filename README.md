@@ -4,6 +4,9 @@ This is a [MatrixCam](https://github.com/xgenium/MatrixCam) PS Vita version with
 ## Controls
 * **Cross:** Toggle between the front and rear cameras
 * **Triangle:** Toggle between modes (Normal and Matrix)
+* **Left/Right:** Decrease/increase brightness
+* **Down/Up:** Decrease/increase contrast
+* **Circle:** reset brightness and contrast to default settings
 
 # Demo
 https://github.com/user-attachments/assets/3a97091b-05f4-42c6-82ff-f376f2daa47f
