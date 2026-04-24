@@ -5,6 +5,9 @@ This is a [MatrixCam](https://github.com/xgenium/MatrixCam) PS Vita version with
 * **Cross:** Toggle between the front and rear cameras
 * **Triangle:** Toggle between modes (Normal and Matrix)
 
+# Demo
+https://github.com/user-attachments/assets/3a97091b-05f4-42c6-82ff-f376f2daa47f
+
 # Build
 Ensure that you have the [VitaSDK](https://vitasdk.org/) installed and configured
 Then you can make the VPK file:
